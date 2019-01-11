@@ -1,7 +1,7 @@
 #include <cox.h>
 
 Timer tRSSI;
-uint32_t tRxStarted;
+struct timeval tRxStarted;
 int16_t rssiRxStarted;
 char buf[20];
 int8_t modem;
@@ -27,11 +27,11 @@ static void printRxDone(void *args) {
     printf("%02X ", rxFrame->buf[i]);
   printf("\b), # of Rx:%u, ", (rxFrame->result == RadioPacket::SUCCESS) ? ++success : success);
   rssiSum += rxFrame->power;
-  printf("average of RSSI:%ld\n", rssiSum / success);
+  printf("average of RSSI:%d\n", rssiSum / success);
   delete rxFrame;
 }
 
-static void eventOnRxDone(void *ctx) {
+static void eventOnRxDone(void *, GPIOInterruptInfo_t *) {
   RadioPacket *rxFrame = new RadioPacket(255);
 
   if (!rxFrame) {
@@ -45,23 +45,25 @@ static void eventOnRxDone(void *ctx) {
   //SX1276.cca();
 }
 
-static void eventOnChannelBusy(void *ctx) {
+static void eventOnChannelBusy(void *, GPIOInterruptInfo_t *) {
   printf("Channel Busy!!\n");
   //SX1276.cca();
 }
 
-static void printRxStarted(void *args) {
-  printf("[%lu us] Rx is started... (%d dB)\n", tRxStarted, rssiRxStarted);
+static void printRxStarted(void *) {
+  printf("[%ld.%06ld] Rx is started... (%d dB)\n", tRxStarted.tv_sec, tRxStarted.tv_usec, rssiRxStarted);
 }
 
-static void eventOnRxStarted(void *ctx) {
-  tRxStarted = micros();
+static void eventOnRxStarted(void *, GPIOInterruptInfo_t *intrInfo) {
+  tRxStarted = intrInfo->timeEnteredISR;
   rssiRxStarted = SX1276.getRssi();
   postTask(printRxStarted, NULL);
 }
 
-static void taskRSSI(void *args) {
-  printf("[%lu us] RSSI: %d dB\n", micros(), SX1276.getRssi());
+static void taskRSSI(void *) {
+  struct timeval now;
+  gettimeofday(&now, nullptr);
+  printf("[%ld.%06ld us] RSSI: %d dB\n", now.tv_sec, now.tv_usec, SX1276.getRssi());
 }
 
 static void eventKeyStroke(SerialPort &) {
@@ -90,9 +92,9 @@ static void appStart() {
   }
 
   SX1276.setChannel(freq);
-  SX1276.onRxStarted(eventOnRxStarted, NULL);
-  SX1276.onRxDone(eventOnRxDone, NULL);
-  SX1276.onChannelBusy(eventOnChannelBusy, NULL);
+  SX1276.onRxStarted = eventOnRxStarted;
+  SX1276.onRxDone = eventOnRxDone;
+  SX1276.onChannelBusy = eventOnChannelBusy;
   SX1276.wakeup();
   //SX1276.cca();
 
@@ -119,7 +121,7 @@ static void inputFrequency(SerialPort &) {
     freq = f;
   }
 
-  printf("* Frequency: %lu\n", freq);
+  printf("* Frequency: %u\n", freq);
   appStart();
 }
 
